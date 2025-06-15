@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Eye, EyeOff, User, Mail, Lock, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, User, Mail, Lock, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface FormData {
@@ -20,6 +20,12 @@ interface FormErrors {
   password?: string;
 }
 
+interface PasswordStrength {
+  score: number;
+  text: string;
+  color: string;
+}
+
 export function SignupForm() {
   const [formData, setFormData] = useState<FormData>({
     fullName: '',
@@ -29,6 +35,27 @@ export function SignupForm() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+
+  const getPasswordStrength = (password: string): PasswordStrength => {
+    if (password.length === 0) return { score: 0, text: '', color: '' };
+    
+    let score = 0;
+    const checks = {
+      length: password.length >= 8,
+      lowercase: /[a-z]/.test(password),
+      uppercase: /[A-Z]/.test(password),
+      numbers: /\d/.test(password),
+      special: /[^A-Za-z0-9]/.test(password)
+    };
+
+    score = Object.values(checks).filter(Boolean).length;
+
+    if (score < 2) return { score, text: 'Weak', color: 'text-red-500' };
+    if (score < 4) return { score, text: 'Fair', color: 'text-yellow-500' };
+    if (score < 5) return { score, text: 'Good', color: 'text-blue-500' };
+    return { score, text: 'Strong', color: 'text-green-500' };
+  };
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
@@ -38,6 +65,8 @@ export function SignupForm() {
       newErrors.fullName = 'Full name is required';
     } else if (formData.fullName.trim().length < 2) {
       newErrors.fullName = 'Full name must be at least 2 characters';
+    } else if (formData.fullName.trim().length > 100) {
+      newErrors.fullName = 'Full name must be less than 100 characters';
     }
 
     // Email validation
@@ -46,6 +75,8 @@ export function SignupForm() {
       newErrors.email = 'Email is required';
     } else if (!emailRegex.test(formData.email)) {
       newErrors.email = 'Please enter a valid email address';
+    } else if (formData.email.length > 255) {
+      newErrors.email = 'Email address is too long';
     }
 
     // Password validation
@@ -53,6 +84,8 @@ export function SignupForm() {
       newErrors.password = 'Password is required';
     } else if (formData.password.length < 6) {
       newErrors.password = 'Password must be at least 6 characters';
+    } else if (formData.password.length > 128) {
+      newErrors.password = 'Password is too long';
     }
 
     setErrors(newErrors);
@@ -92,9 +125,19 @@ export function SignupForm() {
       if (response.ok) {
         toast.success(data.message || 'Account created successfully!');
         setFormData({ fullName: '', email: '', password: '' });
-        // In a real app, you might redirect to a welcome page or login
+        setIsSuccess(true);
+        
+        // Redirect after success (you can customize this)
+        setTimeout(() => {
+          window.location.href = '/login';
+        }, 2000);
       } else {
         toast.error(data.error || 'Something went wrong');
+        
+        // Handle specific error cases
+        if (response.status === 429) {
+          toast.error('Too many attempts. Please wait before trying again.');
+        }
       }
     } catch (error) {
       console.error('Signup error:', error);
@@ -103,6 +146,29 @@ export function SignupForm() {
       setIsLoading(false);
     }
   };
+
+  const passwordStrength = getPasswordStrength(formData.password);
+
+  if (isSuccess) {
+    return (
+      <Card className="w-full max-w-md mx-auto shadow-xl border-0 bg-white/95 backdrop-blur-sm">
+        <CardContent className="pt-8">
+          <div className="text-center space-y-4">
+            <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
+              <CheckCircle className="h-8 w-8 text-green-600" />
+            </div>
+            <h3 className="text-xl font-semibold text-gray-900">Account Created!</h3>
+            <p className="text-gray-600">
+              Welcome to EduSign! You'll be redirected to the login page shortly.
+            </p>
+            <div className="flex justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="w-full max-w-md mx-auto shadow-xl border-0 bg-white/95 backdrop-blur-sm">
@@ -132,10 +198,12 @@ export function SignupForm() {
                 className={`pl-10 h-12 ${errors.fullName ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'}`}
                 placeholder="Enter your full name"
                 disabled={isLoading}
+                maxLength={100}
               />
             </div>
             {errors.fullName && (
               <p className="text-sm text-red-500 flex items-center gap-1">
+                <AlertCircle className="h-4 w-4" />
                 {errors.fullName}
               </p>
             )}
@@ -157,10 +225,12 @@ export function SignupForm() {
                 className={`pl-10 h-12 ${errors.email ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'}`}
                 placeholder="Enter your email address"
                 disabled={isLoading}
+                maxLength={255}
               />
             </div>
             {errors.email && (
               <p className="text-sm text-red-500 flex items-center gap-1">
+                <AlertCircle className="h-4 w-4" />
                 {errors.email}
               </p>
             )}
@@ -182,6 +252,7 @@ export function SignupForm() {
                 className={`pl-10 pr-10 h-12 ${errors.password ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'}`}
                 placeholder="Create a secure password"
                 disabled={isLoading}
+                maxLength={128}
               />
               <button
                 type="button"
@@ -194,12 +265,31 @@ export function SignupForm() {
             </div>
             {errors.password && (
               <p className="text-sm text-red-500 flex items-center gap-1">
+                <AlertCircle className="h-4 w-4" />
                 {errors.password}
               </p>
             )}
             {formData.password && formData.password.length > 0 && (
-              <div className="text-sm text-gray-600">
-                Password strength: {formData.password.length < 6 ? 'Weak' : formData.password.length < 10 ? 'Good' : 'Strong'}
+              <div className="space-y-2">
+                <div className={`text-sm ${passwordStrength.color}`}>
+                  Password strength: {passwordStrength.text}
+                </div>
+                <div className="flex space-x-1">
+                  {[...Array(5)].map((_, i) => (
+                    <div
+                      key={i}
+                      className={`h-1 w-full rounded ${
+                        i < passwordStrength.score 
+                          ? passwordStrength.score < 2 
+                            ? 'bg-red-500' 
+                            : passwordStrength.score < 4 
+                              ? 'bg-yellow-500' 
+                              : 'bg-green-500'
+                          : 'bg-gray-200'
+                      }`}
+                    />
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -208,7 +298,7 @@ export function SignupForm() {
           <Button
             type="submit"
             disabled={isLoading}
-            className="w-full h-12 bg-gradient-to-r from-blue-600 to-teal-600 hover:from-blue-700 hover:to-teal-700 text-white font-semibold text-lg transition-all duration-200 transform hover:scale-[1.02]"
+            className="w-full h-12 bg-gradient-to-r from-blue-600 to-teal-600 hover:from-blue-700 hover:to-teal-700 text-white font-semibold text-lg transition-all duration-200 transform hover:scale-[1.02] disabled:transform-none disabled:opacity-50"
           >
             {isLoading ? (
               <>
