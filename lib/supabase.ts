@@ -23,6 +23,18 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   }
 });
 
+// Server-side client for API routes (uses service role key or anon key)
+export const supabaseServer = createClient(
+  supabaseUrl, 
+  supabaseServiceRoleKey || supabaseAnonKey,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
+);
+
 // Admin client for server-side operations (optional)
 export const supabaseAdmin = supabaseServiceRoleKey 
   ? createClient(supabaseUrl, supabaseServiceRoleKey, {

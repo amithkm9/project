@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
-import { supabase } from '@/lib/supabase';
+import { supabaseServer } from '@/lib/supabase';
 
 // Rate limiting (simple in-memory store - use Redis in production)
 const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user already exists
-    const { data: existingUser, error: checkError } = await supabase
+    const { data: existingUser, error: checkError } = await supabaseServer
       .from('users')
       .select('id')
       .eq('email', trimmedEmail)
@@ -131,7 +131,7 @@ export async function POST(request: NextRequest) {
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
     // Create user
-    const { data: newUser, error: insertError } = await supabase
+    const { data: newUser, error: insertError } = await supabaseServer
       .from('users')
       .insert({
         full_name: trimmedFullName,
