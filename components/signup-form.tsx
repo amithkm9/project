@@ -1,110 +1,81 @@
+// components/signup-form.tsx
 'use client';
 
 import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Eye, EyeOff, User, Mail, Lock, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
-import { toast } from 'sonner';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Eye, EyeOff, Loader2 } from 'lucide-react';
 
-interface FormData {
+interface SignupFormData {
   fullName: string;
   email: string;
   password: string;
-}
-
-interface FormErrors {
-  fullName?: string;
-  email?: string;
-  password?: string;
-}
-
-interface PasswordStrength {
-  score: number;
-  text: string;
-  color: string;
+  confirmPassword: string;
 }
 
 export function SignupForm() {
-  const [formData, setFormData] = useState<FormData>({
+  const [formData, setFormData] = useState<SignupFormData>({
     fullName: '',
     email: '',
-    password: ''
+    password: '',
+    confirmPassword: ''
   });
-  const [errors, setErrors] = useState<FormErrors>({});
-  const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
-  const getPasswordStrength = (password: string): PasswordStrength => {
-    if (password.length === 0) return { score: 0, text: '', color: '' };
-    
-    let score = 0;
-    const checks = {
-      length: password.length >= 8,
-      lowercase: /[a-z]/.test(password),
-      uppercase: /[A-Z]/.test(password),
-      numbers: /\d/.test(password),
-      special: /[^A-Za-z0-9]/.test(password)
-    };
-
-    score = Object.values(checks).filter(Boolean).length;
-
-    if (score < 2) return { score, text: 'Weak', color: 'text-red-500' };
-    if (score < 4) return { score, text: 'Fair', color: 'text-yellow-500' };
-    if (score < 5) return { score, text: 'Good', color: 'text-blue-500' };
-    return { score, text: 'Strong', color: 'text-green-500' };
-  };
-
-  const validateForm = (): boolean => {
-    const newErrors: FormErrors = {};
-
-    // Full name validation
-    if (!formData.fullName.trim()) {
-      newErrors.fullName = 'Full name is required';
-    } else if (formData.fullName.trim().length < 2) {
-      newErrors.fullName = 'Full name must be at least 2 characters';
-    } else if (formData.fullName.trim().length > 100) {
-      newErrors.fullName = 'Full name must be less than 100 characters';
-    }
-
-    // Email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!formData.email) {
-      newErrors.email = 'Email is required';
-    } else if (!emailRegex.test(formData.email)) {
-      newErrors.email = 'Please enter a valid email address';
-    } else if (formData.email.length > 255) {
-      newErrors.email = 'Email address is too long';
-    }
-
-    // Password validation
-    if (!formData.password) {
-      newErrors.password = 'Password is required';
-    } else if (formData.password.length < 6) {
-      newErrors.password = 'Password must be at least 6 characters';
-    } else if (formData.password.length > 128) {
-      newErrors.password = 'Password is too long';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
+  const router = useRouter();
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-    
-    // Clear error when user starts typing
-    if (errors[name as keyof FormErrors]) {
-      setErrors(prev => ({ ...prev, [name]: undefined }));
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    // Clear errors when user starts typing
+    if (error) setError('');
+  };
+
+  const validateForm = (): boolean => {
+    // Full name validation
+    if (!formData.fullName.trim() || formData.fullName.trim().length < 2) {
+      setError('Full name must be at least 2 characters long');
+      return false;
     }
+
+    // Email validation
+    const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+    if (!emailRegex.test(formData.email)) {
+      setError('Please enter a valid email address');
+      return false;
+    }
+
+    // Password validation
+    if (formData.password.length < 8) {
+      setError('Password must be at least 8 characters long');
+      return false;
+    }
+
+    // Password confirmation validation
+    if (formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match');
+      return false;
+    }
+
+    return true;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+    setError('');
+    setSuccess('');
+
     if (!validateForm()) {
       return;
     }
@@ -112,101 +83,74 @@ export function SignupForm() {
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/signup', {
+      const response = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          fullName: formData.fullName.trim(),
+          email: formData.email.toLowerCase().trim(),
+          password: formData.password,
+        }),
       });
 
       const data = await response.json();
 
-      if (response.ok) {
-        toast.success(data.message || 'Account created successfully!');
-        setFormData({ fullName: '', email: '', password: '' });
-        setIsSuccess(true);
-        
-        // Redirect after success (you can customize this)
-        setTimeout(() => {
-          window.location.href = '/login';
-        }, 2000);
-      } else {
-        toast.error(data.error || 'Something went wrong');
-        
-        // Handle specific error cases
-        if (response.status === 429) {
-          toast.error('Too many attempts. Please wait before trying again.');
-        }
+      if (!response.ok) {
+        throw new Error(data.message || 'Something went wrong');
       }
-    } catch (error) {
-      console.error('Signup error:', error);
-      toast.error('Network error. Please check your connection and try again.');
+
+      setSuccess('Account created successfully! Redirecting to login...');
+      
+      // Reset form
+      setFormData({
+        fullName: '',
+        email: '',
+        password: '',
+        confirmPassword: ''
+      });
+
+      // Redirect to login page after 2 seconds
+      setTimeout(() => {
+        router.push('/login');
+      }, 2000);
+
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create account');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const passwordStrength = getPasswordStrength(formData.password);
-
-  if (isSuccess) {
-    return (
-      <Card className="w-full max-w-md mx-auto shadow-xl border-0 bg-white/95 backdrop-blur-sm">
-        <CardContent className="pt-8">
-          <div className="text-center space-y-4">
-            <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
-              <CheckCircle className="h-8 w-8 text-green-600" />
-            </div>
-            <h3 className="text-xl font-semibold text-gray-900">Account Created!</h3>
-            <p className="text-gray-600">
-              Welcome to EduSign! You'll be redirected to the login page shortly.
-            </p>
-            <div className="flex justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
-    <Card className="w-full max-w-md mx-auto shadow-xl border-0 bg-white/95 backdrop-blur-sm">
-      <CardHeader className="space-y-1 text-center pb-8">
-        <CardTitle className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-teal-600 bg-clip-text text-transparent">
-          Join EduSign
+    <Card className="w-full max-w-md mx-auto shadow-xl bg-white/95 backdrop-blur-sm">
+      <CardHeader className="space-y-1">
+        <CardTitle className="text-2xl font-bold text-center text-gray-900">
+          Create Account
         </CardTitle>
-        <p className="text-gray-600">
-          Start your sign language learning journey today
+        <p className="text-sm text-gray-600 text-center">
+          Enter your details to get started
         </p>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-4">
           {/* Full Name Field */}
           <div className="space-y-2">
             <Label htmlFor="fullName" className="text-sm font-medium text-gray-700">
               Full Name
             </Label>
-            <div className="relative">
-              <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-              <Input
-                id="fullName"
-                name="fullName"
-                type="text"
-                value={formData.fullName}
-                onChange={handleInputChange}
-                className={`pl-10 h-12 ${errors.fullName ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'}`}
-                placeholder="Enter your full name"
-                disabled={isLoading}
-                maxLength={100}
-              />
-            </div>
-            {errors.fullName && (
-              <p className="text-sm text-red-500 flex items-center gap-1">
-                <AlertCircle className="h-4 w-4" />
-                {errors.fullName}
-              </p>
-            )}
+            <Input
+              id="fullName"
+              name="fullName"
+              type="text"
+              value={formData.fullName}
+              onChange={handleInputChange}
+              placeholder="Enter your full name"
+              required
+              disabled={isLoading}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
           </div>
 
           {/* Email Field */}
@@ -214,26 +158,17 @@ export function SignupForm() {
             <Label htmlFor="email" className="text-sm font-medium text-gray-700">
               Email Address
             </Label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-              <Input
-                id="email"
-                name="email"
-                type="email"
-                value={formData.email}
-                onChange={handleInputChange}
-                className={`pl-10 h-12 ${errors.email ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'}`}
-                placeholder="Enter your email address"
-                disabled={isLoading}
-                maxLength={255}
-              />
-            </div>
-            {errors.email && (
-              <p className="text-sm text-red-500 flex items-center gap-1">
-                <AlertCircle className="h-4 w-4" />
-                {errors.email}
-              </p>
-            )}
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              value={formData.email}
+              onChange={handleInputChange}
+              placeholder="Enter your email"
+              required
+              disabled={isLoading}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
           </div>
 
           {/* Password Field */}
@@ -242,83 +177,113 @@ export function SignupForm() {
               Password
             </Label>
             <div className="relative">
-              <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
               <Input
                 id="password"
                 name="password"
                 type={showPassword ? 'text' : 'password'}
                 value={formData.password}
                 onChange={handleInputChange}
-                className={`pl-10 pr-10 h-12 ${errors.password ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'}`}
-                placeholder="Create a secure password"
+                placeholder="Create a password"
+                required
                 disabled={isLoading}
-                maxLength={128}
+                className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
                 disabled={isLoading}
               >
-                {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
               </button>
             </div>
-            {errors.password && (
-              <p className="text-sm text-red-500 flex items-center gap-1">
-                <AlertCircle className="h-4 w-4" />
-                {errors.password}
-              </p>
-            )}
-            {formData.password && formData.password.length > 0 && (
-              <div className="space-y-2">
-                <div className={`text-sm ${passwordStrength.color}`}>
-                  Password strength: {passwordStrength.text}
-                </div>
-                <div className="flex space-x-1">
-                  {[...Array(5)].map((_, i) => (
-                    <div
-                      key={i}
-                      className={`h-1 w-full rounded ${
-                        i < passwordStrength.score 
-                          ? passwordStrength.score < 2 
-                            ? 'bg-red-500' 
-                            : passwordStrength.score < 4 
-                              ? 'bg-yellow-500' 
-                              : 'bg-green-500'
-                          : 'bg-gray-200'
-                      }`}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
+            <p className="text-xs text-gray-500">
+              Must be at least 8 characters long
+            </p>
           </div>
+
+          {/* Confirm Password Field */}
+          <div className="space-y-2">
+            <Label htmlFor="confirmPassword" className="text-sm font-medium text-gray-700">
+              Confirm Password
+            </Label>
+            <div className="relative">
+              <Input
+                id="confirmPassword"
+                name="confirmPassword"
+                type={showConfirmPassword ? 'text' : 'password'}
+                value={formData.confirmPassword}
+                onChange={handleInputChange}
+                placeholder="Confirm your password"
+                required
+                disabled={isLoading}
+                className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                disabled={isLoading}
+              >
+                {showConfirmPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Error Alert */}
+          {error && (
+            <Alert className="border-red-200 bg-red-50">
+              <AlertDescription className="text-red-800">
+                {error}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Success Alert */}
+          {success && (
+            <Alert className="border-green-200 bg-green-50">
+              <AlertDescription className="text-green-800">
+                {success}
+              </AlertDescription>
+            </Alert>
+          )}
 
           {/* Submit Button */}
           <Button
             type="submit"
             disabled={isLoading}
-            className="w-full h-12 bg-gradient-to-r from-blue-600 to-teal-600 hover:from-blue-700 hover:to-teal-700 text-white font-semibold text-lg transition-all duration-200 transform hover:scale-[1.02] disabled:transform-none disabled:opacity-50"
+            className="w-full bg-gradient-to-r from-blue-600 to-teal-600 hover:from-blue-700 hover:to-teal-700 text-white font-medium py-2 px-4 rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoading ? (
               <>
-                <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Creating Account...
               </>
             ) : (
               'Create Account'
             )}
           </Button>
-
-          {/* Additional Info */}
-          <div className="text-center text-sm text-gray-600">
-            <p>
-              By signing up, you agree to our{' '}
-              <a href="#" className="text-blue-600 hover:underline">Terms of Service</a> and{' '}
-              <a href="#" className="text-blue-600 hover:underline">Privacy Policy</a>
-            </p>
-          </div>
         </form>
+
+        {/* Terms and Privacy */}
+        <p className="mt-4 text-xs text-gray-600 text-center">
+          By creating an account, you agree to our{' '}
+          <a href="/terms" className="text-blue-600 hover:underline">
+            Terms of Service
+          </a>{' '}
+          and{' '}
+          <a href="/privacy" className="text-blue-600 hover:underline">
+            Privacy Policy
+          </a>
+        </p>
       </CardContent>
     </Card>
   );

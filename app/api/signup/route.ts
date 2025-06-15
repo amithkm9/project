@@ -1,221 +1,138 @@
+// app/api/auth/signup/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { supabaseServer } from '@/lib/supabase';
 
-// Rate limiting (simple in-memory store - use Redis in production)
-const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
-
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now();
-  const windowMs = 15 * 60 * 1000; // 15 minutes
-  const maxAttempts = 5;
-
-  const record = rateLimitStore.get(ip);
-  
-  if (!record || now > record.resetTime) {
-    rateLimitStore.set(ip, { count: 1, resetTime: now + windowMs });
-    return true;
-  }
-
-  if (record.count >= maxAttempts) {
-    return false;
-  }
-
-  record.count++;
-  return true;
+interface SignupRequest {
+  fullName: string;
+  email: string;
+  password: string;
 }
 
 export async function POST(request: NextRequest) {
   try {
-    // Rate limiting
-    const ip = request.ip || request.headers.get('x-forwarded-for') || 'unknown';
-    if (!checkRateLimit(ip)) {
-      return NextResponse.json(
-        { error: 'Too many signup attempts. Please try again later.' },
-        { status: 429 }
-      );
-    }
+    // Parse request body
+    const body: SignupRequest = await request.json();
+    const { fullName, email, password } = body;
 
-    const { fullName, email, password } = await request.json();
-
-    // Input validation
+    // Validation
     if (!fullName || !email || !password) {
       return NextResponse.json(
-        { error: 'Please provide all required fields' },
+        { message: 'Full name, email, and password are required' },
         { status: 400 }
       );
     }
 
-    // Trim and validate full name
-    const trimmedFullName = fullName.trim();
-    if (trimmedFullName.length < 2) {
+    // Validate full name
+    if (fullName.trim().length < 2) {
       return NextResponse.json(
-        { error: 'Full name must be at least 2 characters long' },
+        { message: 'Full name must be at least 2 characters long' },
         { status: 400 }
       );
     }
 
-    if (trimmedFullName.length > 100) {
+    // Validate email format
+    const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+    if (!emailRegex.test(email)) {
       return NextResponse.json(
-        { error: 'Full name must be less than 100 characters' },
+        { message: 'Please enter a valid email address' },
         { status: 400 }
       );
     }
 
-    // Email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const trimmedEmail = email.trim().toLowerCase();
-    
-    if (!emailRegex.test(trimmedEmail)) {
+    // Validate password strength
+    if (password.length < 8) {
       return NextResponse.json(
-        { error: 'Please provide a valid email address' },
+        { message: 'Password must be at least 8 characters long' },
         { status: 400 }
       );
     }
 
-    if (trimmedEmail.length > 255) {
-      return NextResponse.json(
-        { error: 'Email address is too long' },
-        { status: 400 }
-      );
-    }
-
-    // Password validation
-    if (password.length < 6) {
-      return NextResponse.json(
-        { error: 'Password must be at least 6 characters long' },
-        { status: 400 }
-      );
-    }
-
-    if (password.length > 128) {
-      return NextResponse.json(
-        { error: 'Password is too long' },
-        { status: 400 }
-      );
-    }
-
-    // Check for common weak passwords
-    const commonPasswords = ['password', '123456', 'password123', 'admin', 'qwerty'];
-    if (commonPasswords.includes(password.toLowerCase())) {
-      return NextResponse.json(
-        { error: 'Please choose a stronger password' },
-        { status: 400 }
-      );
-    }
+    // Clean and normalize data
+    const cleanFullName = fullName.trim();
+    const cleanEmail = email.toLowerCase().trim();
 
     // Check if user already exists
     const { data: existingUser, error: checkError } = await supabaseServer
       .from('users')
       .select('id')
-      .eq('email', trimmedEmail)
-      .maybeSingle();
+      .eq('email', cleanEmail)
+      .single();
 
-    if (checkError) {
-      console.error('Database error checking existing user:', checkError);
+    if (checkError && checkError.code !== 'PGRST116') {
+      console.error('Database check error:', checkError);
       return NextResponse.json(
-        { error: 'Database error. Please try again later.' },
+        { message: 'Database error occurred' },
         { status: 500 }
       );
     }
 
     if (existingUser) {
       return NextResponse.json(
-        { error: 'User with this email already exists' },
+        { message: 'An account with this email already exists' },
         { status: 409 }
       );
     }
 
-    // Hash password with higher salt rounds for better security
+    // Hash password
     const saltRounds = 12;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    // Create user
+    // Insert new user
     const { data: newUser, error: insertError } = await supabaseServer
       .from('users')
       .insert({
-        full_name: trimmedFullName,
-        email: trimmedEmail,
-        password_hash: hashedPassword,
+        full_name: cleanFullName,
+        email: cleanEmail,
+        password_hash: passwordHash,
       })
       .select('id, full_name, email, created_at')
       .single();
 
     if (insertError) {
-      console.error('Database error creating user:', insertError);
+      console.error('Insert error:', insertError);
       
-      // Handle unique constraint violation
+      // Handle specific database errors
       if (insertError.code === '23505') {
         return NextResponse.json(
-          { error: 'User with this email already exists' },
+          { message: 'An account with this email already exists' },
           { status: 409 }
         );
       }
-
-      // Handle check constraint violations
-      if (insertError.code === '23514') {
-        return NextResponse.json(
-          { error: 'Invalid input data. Please check your information.' },
-          { status: 400 }
-        );
-      }
-
+      
       return NextResponse.json(
-        { error: 'Failed to create account. Please try again later.' },
+        { message: 'Failed to create account. Please try again.' },
         { status: 500 }
       );
     }
 
-    // Success response
+    // Return success response (without password hash)
     return NextResponse.json(
-      { 
-        message: 'Account created successfully! Welcome to EduSign!',
+      {
+        message: 'Account created successfully',
         user: {
           id: newUser.id,
           fullName: newUser.full_name,
           email: newUser.email,
           createdAt: newUser.created_at,
-        }
+        },
       },
       { status: 201 }
     );
 
-  } catch (error: any) {
+  } catch (error) {
     console.error('Signup error:', error);
-
-    // Handle JSON parsing errors
+    
     if (error instanceof SyntaxError) {
       return NextResponse.json(
-        { error: 'Invalid request format' },
+        { message: 'Invalid request format' },
         { status: 400 }
       );
     }
-
+    
     return NextResponse.json(
-      { error: 'Internal server error. Please try again later.' },
+      { message: 'Internal server error' },
       { status: 500 }
     );
   }
-}
-
-// Handle other HTTP methods
-export async function GET() {
-  return NextResponse.json(
-    { error: 'Method not allowed' },
-    { status: 405 }
-  );
-}
-
-export async function PUT() {
-  return NextResponse.json(
-    { error: 'Method not allowed' },
-    { status: 405 }
-  );
-}
-
-export async function DELETE() {
-  return NextResponse.json(
-    { error: 'Method not allowed' },
-    { status: 405 }
-  );
 }
