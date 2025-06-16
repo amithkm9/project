@@ -1,4 +1,4 @@
-// app/api/auth/signup/route.ts
+// app/api/signup/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { supabaseServer } from '@/lib/supabase';
@@ -7,18 +7,19 @@ interface SignupRequest {
   fullName: string;
   email: string;
   password: string;
+  age: number;
 }
 
 export async function POST(request: NextRequest) {
   try {
     // Parse request body
     const body: SignupRequest = await request.json();
-    const { fullName, email, password } = body;
+    const { fullName, email, password, age } = body;
 
     // Validation
-    if (!fullName || !email || !password) {
+    if (!fullName || !email || !password || !age) {
       return NextResponse.json(
-        { message: 'Full name, email, and password are required' },
+        { message: 'Full name, email, password, and age are required' },
         { status: 400 }
       );
     }
@@ -44,6 +45,14 @@ export async function POST(request: NextRequest) {
     if (password.length < 8) {
       return NextResponse.json(
         { message: 'Password must be at least 8 characters long' },
+        { status: 400 }
+      );
+    }
+
+    // Validate age
+    if (age < 2 || age > 100) {
+      return NextResponse.json(
+        { message: 'Please provide a valid age between 2 and 100' },
         { status: 400 }
       );
     }
@@ -85,8 +94,9 @@ export async function POST(request: NextRequest) {
         full_name: cleanFullName,
         email: cleanEmail,
         password_hash: passwordHash,
+        age: age,
       })
-      .select('id, full_name, email, created_at')
+      .select('id, full_name, email, age, created_at')
       .single();
 
     if (insertError) {
@@ -106,6 +116,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Create user progress document
+    try {
+      const { error: progressError } = await supabaseServer
+        .from('user_progress')
+        .insert({
+          user_id: newUser.id,
+          courses_completed: [],
+          total_lessons_completed: 0,
+          current_streak: 0,
+          last_activity: new Date().toISOString(),
+        });
+
+      if (progressError) {
+        console.error('Progress creation error:', progressError);
+        // Don't fail the signup if progress creation fails
+      }
+    } catch (progressErr) {
+      console.error('Progress creation failed:', progressErr);
+      // Continue with successful signup
+    }
+
     // Return success response (without password hash)
     return NextResponse.json(
       {
@@ -114,6 +145,7 @@ export async function POST(request: NextRequest) {
           id: newUser.id,
           fullName: newUser.full_name,
           email: newUser.email,
+          age: newUser.age,
           createdAt: newUser.created_at,
         },
       },

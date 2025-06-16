@@ -6,76 +6,58 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
+import { supabase } from '@/lib/supabase';
 
 interface SignupFormData {
   fullName: string;
   email: string;
   password: string;
-  confirmPassword: string;
+  age: number;
 }
 
 export function SignupForm() {
+  const router = useRouter();
   const [formData, setFormData] = useState<SignupFormData>({
     fullName: '',
     email: '',
     password: '',
-    confirmPassword: ''
+    age: 0,
   });
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-
-  const router = useRouter();
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
-    // Clear errors when user starts typing
-    if (error) setError('');
-  };
+  const [errors, setErrors] = useState<Partial<SignupFormData>>({});
 
   const validateForm = (): boolean => {
-    // Full name validation
-    if (!formData.fullName.trim() || formData.fullName.trim().length < 2) {
-      setError('Full name must be at least 2 characters long');
-      return false;
+    const newErrors: Partial<SignupFormData> = {};
+
+    if (formData.fullName.trim().length < 2) {
+      newErrors.fullName = 'Full name must be at least 2 characters long';
     }
 
-    // Email validation
     const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
     if (!emailRegex.test(formData.email)) {
-      setError('Please enter a valid email address');
-      return false;
+      newErrors.email = 'Please enter a valid email address';
     }
 
-    // Password validation
     if (formData.password.length < 8) {
-      setError('Password must be at least 8 characters long');
-      return false;
+      newErrors.password = 'Password must be at least 8 characters long';
     }
 
-    // Password confirmation validation
-    if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
-      return false;
+    if (formData.age < 2 || formData.age > 100) {
+      newErrors.age = 'Please select a valid age';
     }
 
-    return true;
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    setSuccess('');
-
+    
     if (!validateForm()) {
       return;
     }
@@ -83,95 +65,137 @@ export function SignupForm() {
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/auth/signup', {
+      // Step 1: Create user account via API
+      const signupResponse = await fetch('/api/signup', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          fullName: formData.fullName.trim(),
-          email: formData.email.toLowerCase().trim(),
+          fullName: formData.fullName,
+          email: formData.email,
           password: formData.password,
+          age: formData.age,
         }),
       });
 
-      const data = await response.json();
+      const signupData = await signupResponse.json();
 
-      if (!response.ok) {
-        throw new Error(data.message || 'Something went wrong');
+      if (!signupResponse.ok) {
+        throw new Error(signupData.message || 'Failed to create account');
       }
 
-      setSuccess('Account created successfully! Redirecting to login...');
-      
-      // Reset form
-      setFormData({
-        fullName: '',
-        email: '',
-        password: '',
-        confirmPassword: ''
+      // Step 2: Sign in with Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: formData.email,
+        password: formData.password,
       });
 
-      // Redirect to login page after 2 seconds
-      setTimeout(() => {
-        router.push('/login');
-      }, 2000);
+      if (authError) {
+        throw new Error('Failed to authenticate user');
+      }
 
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create account');
+      // Step 3: Store user data in localStorage for immediate access
+      localStorage.setItem('user', JSON.stringify({
+        id: signupData.user.id,
+        fullName: signupData.user.fullName,
+        email: signupData.user.email,
+        age: formData.age,
+      }));
+
+      toast.success('Account created successfully!', {
+        description: 'Redirecting to your dashboard...',
+      });
+
+      // Step 4: Redirect to home page
+      setTimeout(() => {
+        router.push('/home');
+      }, 1000);
+
+    } catch (error) {
+      console.error('Signup error:', error);
+      toast.error(error instanceof Error ? error.message : 'An error occurred during signup');
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <Card className="w-full max-w-md mx-auto shadow-xl bg-white/95 backdrop-blur-sm">
-      <CardHeader className="space-y-1">
-        <CardTitle className="text-2xl font-bold text-center text-gray-900">
-          Create Account
-        </CardTitle>
-        <p className="text-sm text-gray-600 text-center">
-          Enter your details to get started
-        </p>
+    <Card className="w-full max-w-md mx-auto shadow-2xl border-0 bg-white/90 backdrop-blur-sm">
+      <CardHeader className="text-center pb-2">
+        <CardTitle className="text-2xl font-bold text-gray-900">Create Account</CardTitle>
+        <CardDescription className="text-gray-600">
+          Join EduSign and start your learning journey
+        </CardDescription>
       </CardHeader>
+      
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Full Name Field */}
+          {/* Full Name */}
           <div className="space-y-2">
             <Label htmlFor="fullName" className="text-sm font-medium text-gray-700">
               Full Name
             </Label>
             <Input
               id="fullName"
-              name="fullName"
               type="text"
-              value={formData.fullName}
-              onChange={handleInputChange}
               placeholder="Enter your full name"
-              required
+              value={formData.fullName}
+              onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+              className={`${errors.fullName ? 'border-red-500' : ''}`}
               disabled={isLoading}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
+            {errors.fullName && (
+              <p className="text-sm text-red-600">{errors.fullName}</p>
+            )}
           </div>
 
-          {/* Email Field */}
+          {/* Email */}
           <div className="space-y-2">
             <Label htmlFor="email" className="text-sm font-medium text-gray-700">
               Email Address
             </Label>
             <Input
               id="email"
-              name="email"
               type="email"
-              value={formData.email}
-              onChange={handleInputChange}
               placeholder="Enter your email"
-              required
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              className={`${errors.email ? 'border-red-500' : ''}`}
               disabled={isLoading}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
+            {errors.email && (
+              <p className="text-sm text-red-600">{errors.email}</p>
+            )}
           </div>
 
-          {/* Password Field */}
+          {/* Age */}
+          <div className="space-y-2">
+            <Label htmlFor="age" className="text-sm font-medium text-gray-700">
+              Age
+            </Label>
+            <Select
+              value={formData.age > 0 ? formData.age.toString() : ''}
+              onValueChange={(value) => setFormData({ ...formData, age: parseInt(value) })}
+              disabled={isLoading}
+            >
+              <SelectTrigger className={`${errors.age ? 'border-red-500' : ''}`}>
+                <SelectValue placeholder="Select your age" />
+              </SelectTrigger>
+              <SelectContent>
+                {Array.from({ length: 99 }, (_, i) => i + 2).map((age) => (
+                  <SelectItem key={age} value={age.toString()}>
+                    {age} years old
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {errors.age && (
+              <p className="text-sm text-red-600">{errors.age}</p>
+            )}
+          </div>
+
+          {/* Password */}
           <div className="space-y-2">
             <Label htmlFor="password" className="text-sm font-medium text-gray-700">
               Password
@@ -179,88 +203,32 @@ export function SignupForm() {
             <div className="relative">
               <Input
                 id="password"
-                name="password"
                 type={showPassword ? 'text' : 'password'}
+                placeholder="Create a strong password"
                 value={formData.password}
-                onChange={handleInputChange}
-                placeholder="Create a password"
-                required
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                className={`pr-10 ${errors.password ? 'border-red-500' : ''}`}
                 disabled={isLoading}
-                className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700"
                 disabled={isLoading}
               >
-                {showPassword ? (
-                  <EyeOff className="h-4 w-4" />
-                ) : (
-                  <Eye className="h-4 w-4" />
-                )}
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
-            <p className="text-xs text-gray-500">
-              Must be at least 8 characters long
-            </p>
+            {errors.password && (
+              <p className="text-sm text-red-600">{errors.password}</p>
+            )}
           </div>
-
-          {/* Confirm Password Field */}
-          <div className="space-y-2">
-            <Label htmlFor="confirmPassword" className="text-sm font-medium text-gray-700">
-              Confirm Password
-            </Label>
-            <div className="relative">
-              <Input
-                id="confirmPassword"
-                name="confirmPassword"
-                type={showConfirmPassword ? 'text' : 'password'}
-                value={formData.confirmPassword}
-                onChange={handleInputChange}
-                placeholder="Confirm your password"
-                required
-                disabled={isLoading}
-                className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-              <button
-                type="button"
-                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
-                disabled={isLoading}
-              >
-                {showConfirmPassword ? (
-                  <EyeOff className="h-4 w-4" />
-                ) : (
-                  <Eye className="h-4 w-4" />
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* Error Alert */}
-          {error && (
-            <Alert className="border-red-200 bg-red-50">
-              <AlertDescription className="text-red-800">
-                {error}
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {/* Success Alert */}
-          {success && (
-            <Alert className="border-green-200 bg-green-50">
-              <AlertDescription className="text-green-800">
-                {success}
-              </AlertDescription>
-            </Alert>
-          )}
 
           {/* Submit Button */}
           <Button
             type="submit"
+            className="w-full bg-gradient-to-r from-blue-600 to-teal-600 hover:from-blue-700 hover:to-teal-700 text-white font-medium py-2.5 transition-all duration-200"
             disabled={isLoading}
-            className="w-full bg-gradient-to-r from-blue-600 to-teal-600 hover:from-blue-700 hover:to-teal-700 text-white font-medium py-2 px-4 rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoading ? (
               <>
@@ -272,18 +240,6 @@ export function SignupForm() {
             )}
           </Button>
         </form>
-
-        {/* Terms and Privacy */}
-        <p className="mt-4 text-xs text-gray-600 text-center">
-          By creating an account, you agree to our{' '}
-          <a href="/terms" className="text-blue-600 hover:underline">
-            Terms of Service
-          </a>{' '}
-          and{' '}
-          <a href="/privacy" className="text-blue-600 hover:underline">
-            Privacy Policy
-          </a>
-        </p>
       </CardContent>
     </Card>
   );
