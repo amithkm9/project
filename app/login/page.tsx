@@ -1,4 +1,4 @@
-// app/login/page.tsx
+// app/login/page.tsx (This should replace app/api/login/page.tsx)
 import { LoginForm } from '@/components/login-form';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Hand, Users, Trophy, Zap } from 'lucide-react';
