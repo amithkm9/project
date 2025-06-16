@@ -1,4 +1,4 @@
-// components/signup-form.tsx
+// components/login-form.tsx
 'use client';
 
 import { useState } from 'react';
@@ -7,49 +7,37 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Eye, EyeOff, Loader2, User, Mail, Lock, Calendar, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, Loader2, Lock, Mail, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import Link from 'next/link';
+import { supabase } from '@/lib/supabase';
 
-interface SignupFormData {
-  fullName: string;
+interface LoginFormData {
   email: string;
   password: string;
-  age: string;
 }
 
-interface SignupResponse {
+interface LoginResponse {
   message: string;
   user: {
     id: string;
     fullName: string;
     email: string;
     age: number;
-    createdAt: string;
   };
 }
 
-export function SignupForm() {
+export function LoginForm() {
   const router = useRouter();
-  const [formData, setFormData] = useState<SignupFormData>({
-    fullName: '',
+  const [formData, setFormData] = useState<LoginFormData>({
     email: '',
     password: '',
-    age: '',
   });
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [errors, setErrors] = useState<Partial<SignupFormData>>({});
+  const [errors, setErrors] = useState<Partial<LoginFormData>>({});
 
   const validateForm = (): boolean => {
-    const newErrors: Partial<SignupFormData> = {};
-
-    // Full name validation
-    if (!formData.fullName.trim()) {
-      newErrors.fullName = 'Full name is required';
-    } else if (formData.fullName.trim().length < 2) {
-      newErrors.fullName = 'Full name must be at least 2 characters';
-    }
+    const newErrors: Partial<LoginFormData> = {};
 
     // Email validation
     if (!formData.email) {
@@ -61,25 +49,13 @@ export function SignupForm() {
     // Password validation
     if (!formData.password) {
       newErrors.password = 'Password is required';
-    } else if (formData.password.length < 8) {
-      newErrors.password = 'Password must be at least 8 characters';
-    }
-
-    // Age validation
-    if (!formData.age) {
-      newErrors.age = 'Age is required';
-    } else {
-      const ageNum = parseInt(formData.age);
-      if (isNaN(ageNum) || ageNum < 2 || ageNum > 100) {
-        newErrors.age = 'Please enter a valid age between 2 and 100';
-      }
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleInputChange = (field: keyof SignupFormData, value: string) => {
+  const handleInputChange = (field: keyof LoginFormData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     
     // Clear error when user starts typing
@@ -98,36 +74,48 @@ export function SignupForm() {
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/signup', {
+      // Call our login API
+      const response = await fetch('/api/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          fullName: formData.fullName.trim(),
-          email: formData.email.toLowerCase().trim(),
-          password: formData.password,
-          age: parseInt(formData.age),
-        }),
+        body: JSON.stringify(formData),
       });
 
-      const data: SignupResponse = await response.json();
+      const data: LoginResponse = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || 'Signup failed');
+        throw new Error(data.message || 'Login failed');
       }
 
-      // Store user data in localStorage
+      // Store user data in localStorage (fallback for client-side)
       localStorage.setItem('user', JSON.stringify(data.user));
 
-      toast.success('Account created successfully! Welcome to EduSign!');
+      // Optional: Create Supabase session if you want to use Supabase auth
+      try {
+        const { error: authError } = await supabase.auth.signInWithPassword({
+          email: formData.email,
+          password: formData.password,
+        });
+        
+        if (authError) {
+          console.warn('Supabase auth failed, using fallback:', authError);
+          // Continue with manual authentication
+        }
+      } catch (authErr) {
+        console.warn('Supabase auth error:', authErr);
+        // Continue with manual authentication
+      }
+
+      toast.success('Welcome back!');
       
       // Redirect to home page
       router.push('/home');
 
     } catch (error) {
-      console.error('Signup error:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to create account. Please try again.');
+      console.error('Login error:', error);
+      toast.error(error instanceof Error ? error.message : 'Login failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -137,43 +125,18 @@ export function SignupForm() {
     <Card className="w-full max-w-md mx-auto shadow-2xl border-0 bg-white/95 backdrop-blur-sm">
       <CardHeader className="space-y-2 text-center pb-8">
         <div className="mx-auto bg-gradient-to-r from-blue-600 to-teal-600 p-3 rounded-full w-fit">
-          <User className="h-6 w-6 text-white" />
+          <Lock className="h-6 w-6 text-white" />
         </div>
         <CardTitle className="text-2xl font-bold text-gray-900">
-          Create Your Account
+          Welcome Back
         </CardTitle>
         <CardDescription className="text-gray-600">
-          Start your sign language learning journey today
+          Sign in to continue your learning journey
         </CardDescription>
       </CardHeader>
 
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Full Name Field */}
-          <div className="space-y-2">
-            <Label htmlFor="fullName" className="text-sm font-medium text-gray-700">
-              Full Name
-            </Label>
-            <div className="relative">
-              <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                id="fullName"
-                type="text"
-                placeholder="Enter your full name"
-                value={formData.fullName}
-                onChange={(e) => handleInputChange('fullName', e.target.value)}
-                className={`pl-10 h-12 ${errors.fullName ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
-                disabled={isLoading}
-              />
-            </div>
-            {errors.fullName && (
-              <div className="flex items-center gap-1 text-red-600 text-sm">
-                <AlertCircle className="h-3 w-3" />
-                {errors.fullName}
-              </div>
-            )}
-          </div>
-
           {/* Email Field */}
           <div className="space-y-2">
             <Label htmlFor="email" className="text-sm font-medium text-gray-700">
@@ -209,7 +172,7 @@ export function SignupForm() {
               <Input
                 id="password"
                 type={showPassword ? 'text' : 'password'}
-                placeholder="Create a password (min. 8 characters)"
+                placeholder="Enter your password"
                 value={formData.password}
                 onChange={(e) => handleInputChange('password', e.target.value)}
                 className={`pl-10 pr-10 h-12 ${errors.password ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
@@ -236,34 +199,15 @@ export function SignupForm() {
             )}
           </div>
 
-          {/* Age Field */}
-          <div className="space-y-2">
-            <Label htmlFor="age" className="text-sm font-medium text-gray-700">
-              Age
-            </Label>
-            <div className="relative">
-              <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                id="age"
-                type="number"
-                placeholder="Enter your age"
-                value={formData.age}
-                onChange={(e) => handleInputChange('age', e.target.value)}
-                className={`pl-10 h-12 ${errors.age ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
-                disabled={isLoading}
-                min="2"
-                max="100"
-              />
-            </div>
-            {errors.age && (
-              <div className="flex items-center gap-1 text-red-600 text-sm">
-                <AlertCircle className="h-3 w-3" />
-                {errors.age}
-              </div>
-            )}
-            <p className="text-xs text-gray-500">
-              We use this to personalize your learning experience
-            </p>
+          {/* Forgot Password Link */}
+          <div className="text-right">
+            <button
+              type="button"
+              className="text-sm text-blue-600 hover:text-blue-700 hover:underline"
+              onClick={() => toast.info('Password reset feature coming soon!')}
+            >
+              Forgot your password?
+            </button>
           </div>
 
           {/* Submit Button */}
@@ -275,10 +219,10 @@ export function SignupForm() {
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Creating Account...
+                Signing In...
               </>
             ) : (
-              'Create Account'
+              'Sign In'
             )}
           </Button>
         </form>
@@ -290,15 +234,22 @@ export function SignupForm() {
           <div className="flex-1 h-px bg-gray-300"></div>
         </div>
 
-        {/* Sign In Link */}
-        <div className="text-center">
-          <p className="text-sm text-gray-600">
-            Already have an account?{' '}
-            <Link href="/login" className="text-blue-600 hover:text-blue-700 hover:underline font-medium">
-              Sign in here
-            </Link>
-          </p>
-        </div>
+        {/* Demo Login Button */}
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full h-12 border-gray-300 text-gray-700 hover:bg-gray-50"
+          onClick={() => {
+            setFormData({
+              email: 'demo@edusign.com',
+              password: 'demo123456'
+            });
+            toast.info('Demo credentials filled in!');
+          }}
+          disabled={isLoading}
+        >
+          Try Demo Account
+        </Button>
       </CardContent>
     </Card>
   );
