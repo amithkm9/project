@@ -1,4 +1,4 @@
-// components/login-form.tsx - Fixed version with proper redirect handling
+// components/login-form.tsx - UPDATED VERSION with better validation
 'use client';
 
 import { useState } from 'react';
@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Eye, EyeOff, Loader2, Lock, Mail, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, Loader2, Lock, Mail, AlertCircle, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface LoginFormData {
@@ -34,6 +34,7 @@ export function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<Partial<LoginFormData>>({});
+  const [loginStatus, setLoginStatus] = useState<string>('');
 
   const validateForm = (): boolean => {
     const newErrors: Partial<LoginFormData> = {};
@@ -68,6 +69,7 @@ export function LoginForm() {
     }
 
     setIsLoading(true);
+    setLoginStatus('Checking credentials...');
 
     try {
       console.log('🚀 Attempting login with:', { email: formData.email });
@@ -77,12 +79,14 @@ export function LoginForm() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          email: formData.email.toLowerCase().trim(),
+          password: formData.password
+        }),
       });
 
       console.log('📡 Response status:', response.status);
-      console.log('📡 Response ok:', response.ok);
-
+      
       const data = await response.json();
       console.log('📦 Response data:', data);
 
@@ -90,29 +94,38 @@ export function LoginForm() {
         throw new Error(data.message || 'Login failed');
       }
 
-      // Store user data
+      // Validate response data
+      if (!data.user || !data.user.id || !data.user.fullName || !data.user.email) {
+        throw new Error('Invalid response data from server');
+      }
+
+      setLoginStatus('Login successful! Storing user data...');
+
+      // Store user data in localStorage
       console.log('💾 Storing user data:', data.user);
       localStorage.setItem('user', JSON.stringify(data.user));
+
+      // Verify storage worked
+      const storedData = localStorage.getItem('user');
+      if (!storedData) {
+        throw new Error('Failed to store user data');
+      }
+
+      setLoginStatus('Redirecting to dashboard...');
 
       // Show success message
       toast.success(`Welcome back, ${data.user.fullName}!`);
       
       console.log('🏠 Redirecting to /home...');
       
-      // Force redirect with window.location as backup
-      router.push('/home');
-      
-      // Backup redirect method
-      setTimeout(() => {
-        if (window.location.pathname !== '/home') {
-          console.log('🔄 Backup redirect triggered');
-          window.location.href = '/home';
-        }
-      }, 1000);
+      // Use window.location.href for immediate redirect
+      window.location.href = '/home';
 
     } catch (error) {
       console.error('❌ Login error:', error);
-      toast.error(error instanceof Error ? error.message : 'Login failed. Please try again.');
+      const errorMessage = error instanceof Error ? error.message : 'Login failed. Please try again.';
+      toast.error(errorMessage);
+      setLoginStatus('');
     } finally {
       setIsLoading(false);
     }
@@ -124,6 +137,51 @@ export function LoginForm() {
       password: 'demo123456'
     });
     toast.info('Demo credentials filled in! Click Sign In to continue.');
+  };
+
+  const handleQuickDemo = async () => {
+    setIsLoading(true);
+    setLoginStatus('Logging in with demo account...');
+    
+    try {
+      // Set demo credentials
+      const demoData = {
+        email: 'demo@edusign.com',
+        password: 'demo123456'
+      };
+
+      console.log('🚀 Quick demo login...');
+      
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(demoData),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Demo login failed');
+      }
+
+      // Store user data
+      localStorage.setItem('user', JSON.stringify(data.user));
+      toast.success(`Welcome to the demo, ${data.user.fullName}!`);
+      
+      setLoginStatus('Demo login successful! Redirecting...');
+      
+      // Force redirect
+      window.location.href = '/home';
+
+    } catch (error) {
+      console.error('❌ Demo login error:', error);
+      toast.error('Demo login failed. Please try again.');
+      setLoginStatus('');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -142,6 +200,16 @@ export function LoginForm() {
         </CardHeader>
 
         <CardContent>
+          {/* Status Message */}
+          {loginStatus && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center gap-2 text-blue-700 text-sm">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {loginStatus}
+              </div>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Email Field */}
             <div className="space-y-2">
@@ -240,36 +308,37 @@ export function LoginForm() {
             <div className="flex-1 h-px bg-gray-300"></div>
           </div>
 
-          {/* Demo Login Button */}
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full h-12 border-gray-300 text-gray-700 hover:bg-gray-50"
-            onClick={handleDemoLogin}
-            disabled={isLoading}
-          >
-            Try Demo Account
-          </Button>
+          {/* Demo Login Buttons */}
+          <div className="space-y-3">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full h-12 border-gray-300 text-gray-700 hover:bg-gray-50"
+              onClick={handleDemoLogin}
+              disabled={isLoading}
+            >
+              Fill Demo Credentials
+            </Button>
 
-          {/* Quick Login Button for Testing */}
-          <div className="mt-4">
             <Button
               type="button"
               className="w-full h-12 bg-green-600 hover:bg-green-700 text-white"
-              onClick={async () => {
-                setFormData({ email: 'demo@edusign.com', password: 'demo123456' });
-                // Auto-submit after a short delay
-                setTimeout(() => {
-                  const form = document.querySelector('form');
-                  if (form) {
-                    form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-                  }
-                }, 100);
-              }}
+              onClick={handleQuickDemo}
               disabled={isLoading}
             >
               🚀 Quick Demo Login
             </Button>
+          </div>
+
+          {/* Debug Info */}
+          <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+            <div className="text-xs text-gray-600">
+              <div><strong>Demo Email:</strong> demo@edusign.com</div>
+              <div><strong>Demo Password:</strong> demo123456</div>
+              <div className="mt-2 text-blue-600">
+                Make sure this user exists in your Supabase database!
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>

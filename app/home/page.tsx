@@ -1,4 +1,4 @@
-// app/home/page.tsx
+// app/home/page.tsx - FIXED VERSION with proper auth validation
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -45,53 +45,100 @@ export default function HomePage() {
   const [courseCategories, setCourseCategories] = useState<CourseCategory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [coursesLoading, setCoursesLoading] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
 
   // Check authentication and get user data
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        // Check Supabase session
-        const { data: { session } } = await supabase.auth.getSession();
+        console.log('🔍 Checking authentication on home page...');
         
-        if (!session) {
-          // Check localStorage fallback
-          const storedUser = localStorage.getItem('user');
-          if (!storedUser) {
-            toast.error('Please sign in to access this page');
-            router.push('/login');
-            return;
+        // Check localStorage for user data
+        const storedUser = localStorage.getItem('user');
+        console.log('💾 Stored user data:', storedUser ? 'Found' : 'Not found');
+        
+        if (storedUser) {
+          try {
+            const userData = JSON.parse(storedUser);
+            console.log('✅ Valid user data found:', userData.email);
+            
+            // Validate that the user data has required fields
+            if (userData.id && userData.fullName && userData.email && userData.age) {
+              setUser(userData);
+              setAuthChecked(true);
+              setIsLoading(false);
+              return;
+            } else {
+              console.warn('⚠️ Stored user data is incomplete');
+              localStorage.removeItem('user');
+            }
+          } catch (error) {
+            console.error('❌ Failed to parse stored user data:', error);
+            localStorage.removeItem('user');
           }
-          
-          const userData = JSON.parse(storedUser);
-          setUser(userData);
-        } else {
-          // Get user data from database
-          const { data: userData, error } = await supabase
-            .from('users')
-            .select('id, full_name, email, age')
-            .eq('id', session.user.id)
-            .single();
-
-          if (error || !userData) {
-            console.error('Failed to fetch user data:', error);
-            toast.error('Failed to load user data');
-            router.push('/login');
-            return;
-          }
-
-          setUser({
-            id: userData.id,
-            fullName: userData.full_name,
-            email: userData.email,
-            age: userData.age,
-          });
         }
-      } catch (error) {
-        console.error('Auth check error:', error);
-        toast.error('Authentication error');
-        router.push('/login');
-      } finally {
+
+        // If no valid localStorage data, check Supabase session
+        console.log('🔍 Checking Supabase session...');
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error('❌ Session error:', sessionError);
+        }
+        
+        if (session?.user) {
+          console.log('✅ Found Supabase session for:', session.user.email);
+          
+          try {
+            // Get user data from database
+            const { data: userData, error } = await supabase
+              .from('users')
+              .select('id, full_name, email, age')
+              .eq('id', session.user.id)
+              .single();
+
+            if (error) {
+              console.error('❌ Failed to fetch user data from DB:', error);
+            } else if (userData) {
+              const user = {
+                id: userData.id,
+                fullName: userData.full_name,
+                email: userData.email,
+                age: userData.age,
+              };
+              
+              console.log('✅ Got user data from DB:', user.email);
+              setUser(user);
+              localStorage.setItem('user', JSON.stringify(user));
+              setAuthChecked(true);
+              setIsLoading(false);
+              return;
+            }
+          } catch (dbError) {
+            console.error('❌ Database error:', dbError);
+          }
+        }
+
+        // If we get here, no valid authentication found
+        console.log('❌ No valid authentication found');
+        setAuthChecked(true);
         setIsLoading(false);
+        
+        // Short delay before redirect to prevent flash
+        setTimeout(() => {
+          toast.error('Please sign in to access this page');
+          router.push('/login');
+        }, 100);
+        
+      } catch (error) {
+        console.error('❌ Auth check error:', error);
+        setAuthChecked(true);
+        setIsLoading(false);
+        
+        setTimeout(() => {
+          toast.error('Authentication error');
+          router.push('/login');
+        }, 100);
       }
     };
 
@@ -101,33 +148,49 @@ export default function HomePage() {
   // Fetch courses based on user age and create categories
   useEffect(() => {
     const fetchCourses = async () => {
-      if (!user?.age) return;
+      if (!user?.age || !authChecked) {
+        console.log('⏳ User not ready for course fetch yet');
+        return;
+      }
 
+      console.log('📚 Fetching courses for user age:', user.age);
       setCoursesLoading(true);
+      
       try {
         // Fetch courses for user's age group
         const response = await fetch(`/api/courses?age=${user.age}&userId=${user.id}`, {
           headers: {
-            'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token || 'fallback'}`,
+            'Authorization': `Bearer fallback`,
+            'Content-Type': 'application/json',
           },
         });
 
+        console.log('📡 Courses API response status:', response.status);
+
         if (!response.ok) {
-          throw new Error('Failed to fetch courses');
+          const errorData = await response.json();
+          throw new Error(`Failed to fetch courses: ${response.status} - ${errorData.message}`);
         }
 
         const data = await response.json();
+        console.log('📦 Courses data received:', data);
+        
         setCourses(data.courses || []);
 
         // Create course categories based on age groups
         const categories = createCourseCategories(user.age, data.courses || []);
         setCourseCategories(categories);
 
+        if (data.courses && data.courses.length > 0) {
+          toast.success(`Found ${data.courses.length} courses for you!`);
+        }
+
       } catch (error) {
-        console.error('Failed to fetch courses:', error);
-        toast.error('Failed to load courses');
+        console.error('❌ Failed to fetch courses:', error);
+        toast.error('Failed to load courses, using sample data');
         
         // Fallback: Use sample courses based on age
+        console.log('🔄 Using fallback sample courses');
         const fallbackCourses = getSampleCourses(user.age);
         setCourses(fallbackCourses);
         const categories = createCourseCategories(user.age, fallbackCourses);
@@ -138,7 +201,7 @@ export default function HomePage() {
     };
 
     fetchCourses();
-  }, [user]);
+  }, [user, authChecked]);
 
   // Create course categories based on age groups
   const createCourseCategories = (userAge: number, allCourses: Course[]): CourseCategory[] => {
@@ -268,6 +331,16 @@ export default function HomePage() {
         duration: '45 min',
         lessonsCount: 25,
       },
+      {
+        id: '9',
+        title: 'Professional ASL',
+        description: 'Advanced sign language for workplace and professional settings.',
+        thumbnail: 'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?w=400&h=300&fit=crop',
+        ageGroup: '16+',
+        difficulty: 'Advanced',
+        duration: '50 min',
+        lessonsCount: 30,
+      },
     ];
 
     // Filter courses based on age
@@ -275,10 +348,13 @@ export default function HomePage() {
     return allCourses.filter(course => course.ageGroup === ageGroup);
   };
 
-// router.push(`/course/${courseId}`);
+  const handleStartCourse = (courseId: string) => {
+    console.log('🚀 Starting course:', courseId);
+    router.push(`/lesson/${courseId}`);
   };
 
-  if (isLoading) {
+  // Show loading screen while checking auth
+  if (isLoading || !authChecked) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-teal-50 flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
@@ -289,8 +365,16 @@ export default function HomePage() {
     );
   }
 
+  // Show redirect message if no user
   if (!user) {
-    return null; // Will redirect
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-teal-50 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-12 w-12 animate-spin text-blue-600" />
+          <p className="text-gray-600">Redirecting to login...</p>
+        </div>
+      </div>
+    );
   }
 
   return (

@@ -1,10 +1,11 @@
-// contexts/AuthContext.tsx
+// contexts/AuthContext.tsx - FIXED VERSION
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 
 interface User {
   id: string;
@@ -55,43 +56,88 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshUser = async () => {
-    const { data: { user: supabaseUser } } = await supabase.auth.getUser();
-    
-    if (supabaseUser) {
-      const userData = await fetchUserData(supabaseUser.id);
-      if (userData) {
+    try {
+      // First check localStorage
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        const userData = JSON.parse(storedUser);
         setUser(userData);
-        setSupabaseUser(supabaseUser);
-        
-        // Update localStorage
-        localStorage.setItem('user', JSON.stringify(userData));
+        return;
       }
+
+      // Then check Supabase
+      const { data: { user: supabaseUser } } = await supabase.auth.getUser();
+      
+      if (supabaseUser) {
+        const userData = await fetchUserData(supabaseUser.id);
+        if (userData) {
+          setUser(userData);
+          setSupabaseUser(supabaseUser);
+          localStorage.setItem('user', JSON.stringify(userData));
+        }
+      }
+    } catch (error) {
+      console.error('Error refreshing user:', error);
     }
   };
 
   const signOut = async () => {
     try {
-      const { error } = await supabase.auth.signOut();
-      if (error) {
-        console.error('Sign out error:', error);
-      }
+      console.log('🚪 Signing out user...');
       
+      // Clear local state first
       setUser(null);
       setSupabaseUser(null);
       localStorage.removeItem('user');
+      
+      // Then try to sign out from Supabase (optional since we use localStorage)
+      try {
+        const { error } = await supabase.auth.signOut();
+        if (error) {
+          console.warn('Supabase sign out error (non-critical):', error);
+        }
+      } catch (supabaseError) {
+        console.warn('Supabase sign out failed (non-critical):', supabaseError);
+      }
+
+      toast.success('Signed out successfully');
       router.push('/');
     } catch (error) {
       console.error('Sign out error:', error);
+      toast.error('Error signing out');
     }
   };
 
   useEffect(() => {
-    // Get initial session
-    const getInitialSession = async () => {
+    const initializeAuth = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        console.log('🔐 Initializing authentication...');
+        
+        // First priority: Check localStorage for user data
+        const storedUser = localStorage.getItem('user');
+        if (storedUser) {
+          try {
+            const userData = JSON.parse(storedUser);
+            console.log('✅ Found stored user data:', userData.email);
+            setUser(userData);
+            setLoading(false);
+            return;
+          } catch (error) {
+            console.error('❌ Failed to parse stored user data:', error);
+            localStorage.removeItem('user');
+          }
+        }
+
+        // Second priority: Check Supabase session
+        console.log('🔍 Checking Supabase session...');
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error('❌ Session error:', sessionError);
+        }
         
         if (session?.user) {
+          console.log('✅ Found Supabase session');
           const userData = await fetchUserData(session.user.id);
           if (userData) {
             setUser(userData);
@@ -99,30 +145,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             localStorage.setItem('user', JSON.stringify(userData));
           }
         } else {
-          // Fallback to localStorage if no session
-          const storedUser = localStorage.getItem('user');
-          if (storedUser) {
-            try {
-              const userData = JSON.parse(storedUser);
-              setUser(userData);
-            } catch (error) {
-              console.error('Failed to parse stored user data:', error);
-              localStorage.removeItem('user');
-            }
-          }
+          console.log('ℹ️ No Supabase session found');
         }
       } catch (error) {
-        console.error('Failed to get initial session:', error);
+        console.error('❌ Failed to initialize auth:', error);
       } finally {
         setLoading(false);
       }
     };
 
-    getInitialSession();
+    initializeAuth();
 
-    // Listen for auth changes
+    // Listen for auth changes (Supabase only)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        console.log('🔄 Auth state changed:', event);
+        
         if (event === 'SIGNED_IN' && session?.user) {
           const userData = await fetchUserData(session.user.id);
           if (userData) {
@@ -131,9 +169,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             localStorage.setItem('user', JSON.stringify(userData));
           }
         } else if (event === 'SIGNED_OUT') {
-          setUser(null);
-          setSupabaseUser(null);
-          localStorage.removeItem('user');
+          // Only clear if it wasn't manually cleared already
+          const storedUser = localStorage.getItem('user');
+          if (!storedUser) {
+            setUser(null);
+            setSupabaseUser(null);
+          }
         }
       }
     );
