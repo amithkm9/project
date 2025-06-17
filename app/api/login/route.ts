@@ -1,4 +1,4 @@
-// app/api/login/route.ts - FIXED VERSION
+// app/api/login/route.ts - FIXED VERSION without invalid count query
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { supabaseServer } from '@/lib/supabase';
@@ -28,28 +28,30 @@ export async function POST(request: NextRequest) {
     console.log('🔍 Searching for user in database:', cleanEmail);
 
     try {
-      // Find user by email in Supabase
-      const { data: user, error: userError } = await supabaseServer
+      // Find user by email - simplified query without count(*)
+      const { data: users, error: userError } = await supabaseServer
         .from('users')
         .select('id, full_name, email, password_hash, age')
         .eq('email', cleanEmail)
-        .single();
+        .limit(1);
 
       console.log('📡 Database query result:', { 
-        found: !!user, 
+        found: users && users.length > 0, 
+        count: users?.length || 0,
         error: userError?.message,
-        userEmail: user?.email 
+        userEmail: users?.[0]?.email
       });
 
-      if (userError && userError.code !== 'PGRST116') {
+      if (userError) {
         console.error('❌ Database error:', userError);
         return NextResponse.json(
-          { message: 'Database error occurred' },
+          { message: 'Database error occurred', error: userError.message },
           { status: 500 }
         );
       }
 
-      if (!user) {
+      // Handle no users found
+      if (!users || users.length === 0) {
         console.log('❌ User not found in database');
         return NextResponse.json(
           { message: 'Invalid email or password' },
@@ -57,10 +59,21 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const user = users[0];
       console.log('✅ User found, verifying password...');
       
       // Verify password
-      const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+      let isPasswordValid = false;
+      
+      try {
+        isPasswordValid = await bcrypt.compare(password, user.password_hash);
+      } catch (bcryptError) {
+        console.error('❌ Password comparison failed:', bcryptError);
+        return NextResponse.json(
+          { message: 'Password verification failed' },
+          { status: 500 }
+        );
+      }
       
       console.log('🔐 Password verification result:', isPasswordValid);
 
@@ -76,7 +89,7 @@ export async function POST(request: NextRequest) {
 
       // Update last activity in user_progress table
       try {
-        await supabaseServer
+        const { error: progressError } = await supabaseServer
           .from('user_progress')
           .upsert({
             user_id: user.id,
@@ -85,8 +98,14 @@ export async function POST(request: NextRequest) {
           }, {
             onConflict: 'user_id'
           });
+
+        if (progressError) {
+          console.warn('⚠️ Progress update failed:', progressError);
+        } else {
+          console.log('✅ Progress updated successfully');
+        }
       } catch (progressErr) {
-        console.warn('⚠️ Progress update failed:', progressErr);
+        console.warn('⚠️ Progress update error:', progressErr);
       }
 
       // Return successful response
@@ -103,7 +122,7 @@ export async function POST(request: NextRequest) {
     } catch (dbError) {
       console.error('❌ Database connection error:', dbError);
       return NextResponse.json(
-        { message: 'Database connection failed' },
+        { message: 'Database connection failed', error: String(dbError) },
         { status: 500 }
       );
     }
